@@ -40,10 +40,10 @@ __global__ void mean_kernel(
 }
 
 template <typename scalar_t>
-__global__ void var_kernel(
+__global__ void std_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> mean,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> var
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> std_eps
 ){
     // declare a shared memory space as same as one block
     __shared__ scalar_t shared_memory[BLOCK_SIZE_BATCH][BLOCK_SIZE_FEATURE];
@@ -67,34 +67,39 @@ __global__ void var_kernel(
         __syncthreads();        // wait, till all threads in this block reach
     }
     
-    // after this for loop, all should be set, so dump the data and calculate the var
+    // after this for loop, all should be set, so dump the data and calculate the std
     if (thread_id_n == 0) {
-        var[c] = shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0));
+        std_eps[c] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0)) + EPSILON);
     }
 }
 
 template <typename scalar_t>
-__global__ void batch_norm_kernel(
+__global__ void bn_forward_mlp_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> mean,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> var,
-    const float gamma,
-    const float beta,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> std_eps,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> beta,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output_data
 ){
+    // batch size
+    const int N = input_data.size(0);
+    
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (n >= input_data.size(0) || c >= input_data.size(1)) return;
 
-    output_data[n][c] = gamma * (input_data[n][c] - mean[c]) / sqrt(var[c] + EPSILON) + beta;
+    output_data[n][c] = gamma[c] * (input_data[n][c] - mean[c]) / std_eps[c] + beta[c];
+    // save for each time, can be imporved later
+    output_data[N][c] = std_eps[c];
 }
 
 
 torch::Tensor bn_forward_mlp_cuda(
     const torch::Tensor X,
-    const float gamma,
-    const float beta
+    const torch::Tensor gamma,
+    const torch::Tensor beta
 ){
     // X: (n, c), n is parallel
     const int N = X.size(0);
@@ -117,24 +122,24 @@ torch::Tensor bn_forward_mlp_cuda(
         );
     }));
 
-    // calculate variance
-    torch::Tensor var = torch::zeros({C}, X.options());
+    // calculate std
+    torch::Tensor std_eps = torch::zeros({C}, X.options());
 
-    // variance share the same block size with mean
-    std::cout << "blocks var: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // standard share the same block size with mean
+    std::cout << "blocks std: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
-    AT_DISPATCH_FLOATING_TYPES(X.type(), "var_kernel",
+    AT_DISPATCH_FLOATING_TYPES(X.type(), "std_kernel",
     ([&] {
-        var_kernel<scalar_t><<<blocks_mean, threads_mean>>>(
+        std_kernel<scalar_t><<<blocks_mean, threads_mean>>>(
             X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             mean.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            var.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>()
+            std_eps.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>()
         );
     }));
 
     // batch norm
-    torch::Tensor batch_norm_out = torch::zeros({N, C}, X.options());
+    torch::Tensor batch_norm_out = torch::zeros({N + 1, C}, X.options());
 
     // batch norm will use a even dispatched block size
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
@@ -143,26 +148,58 @@ torch::Tensor bn_forward_mlp_cuda(
     std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
 
     // launch the kernel
-    AT_DISPATCH_FLOATING_TYPES(X.type(), "batch_norm_kernel",
+    AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_mlp_kernel",
     ([&] {
-        batch_norm_kernel<scalar_t><<<blocks_batch_norm, threads_batch_norm>>>(
+        bn_forward_mlp_kernel<scalar_t><<<blocks_batch_norm, threads_batch_norm>>>(
             X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             mean.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            var.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            gamma,
-            beta,
+            std_eps.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+            gamma.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+            beta.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             batch_norm_out.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
         );
     }));
 
+    // batch_norm_out contains all things that we need to save in PyTorch
+    // gamma will be saved outside in PyTorch, here only save bn_out and std_eps
+    /*
+        0: [x1, x2, ..., xn]
+        1: [x1, x2, ..., xn]
+        ... ...
+        n - 1: [x1, x2, ..., xn]
+
+        n: [std1, std2, ..., stdn]
+    */
     return batch_norm_out;
 }
 
-// torch::Tensor bn_forward_cuda_conv(
-//     const torch::Tensor X,
-//     const int a,
-//     const int b
+
+
+// template <typename scalar_t>
+// __global__ void bn_backward_input_mlp_kernel(
+//     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> dL_doutput,
+//     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output,
+//     const float gamma,
+//     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> std_eps,
+//     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> dL_dinput
 // ){
-//     // X: (n, c, h, w), n, h, w are parallel
-//     return 0;
+//     const int N = output.size(0);
+
+//     const int n = blockIdx.x * blockDim.x + threadIdx.x;
+//     const int c = blockIdx.y * blockDim.y + threadIdx.y;
+
+//     if (n >= output.size(0) || c >= output.size(1)) return;
+
+//     output_data[n][c] = gamma * (input_data[n][c] - mean[c]) / std_eps[c] + beta;
+//     // save for each time, can be imporved later
+//     output_data[batch_size][c] = std_eps[c];
+// }
+
+// torch::Tensor bn_backward_mlp(
+//     const torch::Tensor dL_doutput,
+//     const torch::Tensor output,
+//     const float gamma,
+//     const torch::Tensor std_eps
+// ){
+    
 // }

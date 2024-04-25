@@ -4,8 +4,8 @@
 
 torch::Tensor bn_forward_mlp(
     const torch::Tensor X,
-    const float gamma,
-    const float beta
+    const torch::Tensor gamma,
+    const torch::Tensor beta
 ){
     CHECK_INPUT(X);
     
