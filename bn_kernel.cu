@@ -43,8 +43,10 @@ template <typename scalar_t>
 __global__ void std_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> mean,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> std_eps
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> batch_norm_output
 ){
+    const int N = input_data.size(0);
+
     // declare a shared memory space as same as one block
     __shared__ scalar_t shared_memory[BLOCK_SIZE_BATCH][BLOCK_SIZE_FEATURE];
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
@@ -69,7 +71,7 @@ __global__ void std_kernel(
     
     // after this for loop, all should be set, so dump the data and calculate the std
     if (thread_id_n == 0) {
-        std_eps[c] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0)) + EPSILON);
+        batch_norm_output[N][c] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0)) + EPSILON);
     }
 }
 
@@ -77,7 +79,6 @@ template <typename scalar_t>
 __global__ void bn_forward_mlp_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> mean,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> std_eps,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> beta,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output_data
@@ -90,9 +91,7 @@ __global__ void bn_forward_mlp_kernel(
 
     if (n >= input_data.size(0) || c >= input_data.size(1)) return;
 
-    output_data[n][c] = gamma[c] * (input_data[n][c] - mean[c]) / std_eps[c] + beta[c];
-    // save for each time, can be imporved later
-    output_data[N][c] = std_eps[c];
+    output_data[n][c] = gamma[c] * (input_data[n][c] - mean[c]) / output_data[N][c] + beta[c];
 }
 
 
@@ -123,7 +122,8 @@ torch::Tensor bn_forward_mlp_cuda(
     }));
 
     // calculate std
-    torch::Tensor std_eps = torch::zeros({C}, X.options());
+    // batch_norm_out: bn_forward + std_eps
+    torch::Tensor batch_norm_out = torch::zeros({N + 1, C}, X.options());
 
     // standard share the same block size with mean
     std::cout << "blocks std: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
@@ -134,12 +134,9 @@ torch::Tensor bn_forward_mlp_cuda(
         std_kernel<scalar_t><<<blocks_mean, threads_mean>>>(
             X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             mean.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            std_eps.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>()
+            batch_norm_out.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
         );
     }));
-
-    // batch norm
-    torch::Tensor batch_norm_out = torch::zeros({N + 1, C}, X.options());
 
     // batch norm will use a even dispatched block size
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
@@ -153,7 +150,6 @@ torch::Tensor bn_forward_mlp_cuda(
         bn_forward_mlp_kernel<scalar_t><<<blocks_batch_norm, threads_batch_norm>>>(
             X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             mean.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            std_eps.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             gamma.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             beta.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             batch_norm_out.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
@@ -246,6 +242,77 @@ __global__ void dx_norm_sum_kernel(
 }
 
 template <typename scalar_t>
+__global__ void grad_gamma_kernel(
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> dL_dout,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> normalized,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output
+){
+    const int N = dL_dout.size(0);
+
+    // declare a shared memory space as same as one block
+    __shared__ scalar_t shared_memory[BLOCK_SIZE_BATCH][BLOCK_SIZE_FEATURE];
+    const int n = blockIdx.x * blockDim.x + threadIdx.x;
+    const int c = blockIdx.y * blockDim.y + threadIdx.y;
+    const int thread_id_n = threadIdx.x;
+    const int thread_id_c = threadIdx.y;
+
+    // if the loc cover our data, load in shared memory
+    if (n < dL_dout.size(0) && c < dL_dout.size(1)){
+        shared_memory[thread_id_n][thread_id_c] = dL_dout[n][c] * normalized[n][c];
+    } else {
+        shared_memory[thread_id_n][thread_id_c] = static_cast<scalar_t>(0);
+    }
+    __syncthreads();            // need to fully load all items into shared_memory
+
+    for (int offset = blockDim.x >> 1; offset > 0; offset >>= 1) {
+        if (thread_id_n < offset) {
+            shared_memory[thread_id_n][thread_id_c] += shared_memory[thread_id_n + offset][thread_id_c];
+        }
+        __syncthreads();        // wait, till all threads in this block reach
+    }
+    
+    // after this for loop, all should be set, so dump the data and calculate the mean
+    if (thread_id_n == 0) {
+        output[N][c] = shared_memory[0][thread_id_c];
+    }
+}
+
+template <typename scalar_t>
+__global__ void grad_beta_kernel(
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> dL_dout,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output
+){
+    const int N = dL_dout.size(0);
+
+    // declare a shared memory space as same as one block
+    __shared__ scalar_t shared_memory[BLOCK_SIZE_BATCH][BLOCK_SIZE_FEATURE];
+    const int n = blockIdx.x * blockDim.x + threadIdx.x;
+    const int c = blockIdx.y * blockDim.y + threadIdx.y;
+    const int thread_id_n = threadIdx.x;
+    const int thread_id_c = threadIdx.y;
+
+    // if the loc cover our data, load in shared memory
+    if (n < dL_dout.size(0) && c < dL_dout.size(1)){
+        shared_memory[thread_id_n][thread_id_c] = dL_dout[n][c];
+    } else {
+        shared_memory[thread_id_n][thread_id_c] = static_cast<scalar_t>(0);
+    }
+    __syncthreads();            // need to fully load all items into shared_memory
+
+    for (int offset = blockDim.x >> 1; offset > 0; offset >>= 1) {
+        if (thread_id_n < offset) {
+            shared_memory[thread_id_n][thread_id_c] += shared_memory[thread_id_n + offset][thread_id_c];
+        }
+        __syncthreads();        // wait, till all threads in this block reach
+    }
+    
+    // after this for loop, all should be set, so dump the data and calculate the mean
+    if (thread_id_n == 0) {
+        output[N + 1][c] = shared_memory[0][thread_id_c];
+    }
+}
+
+template <typename scalar_t>
 __global__ void bn_backward_input_mlp_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> dL_dout,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
@@ -306,7 +373,29 @@ torch::Tensor bn_backward_mlp_cuda(
         );
     }));
 
-    torch::Tensor dL_dinput = torch::zeros({N, C}, normalized.options());
+    // bn_backward_output: grad_input + grad_gamma + grad_beta
+    torch::Tensor bn_backward_output = torch::zeros({N + 2, C}, normalized.options());
+
+    std::cout << "blocks grad_gamma: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
+
+    AT_DISPATCH_FLOATING_TYPES(normalized.type(), "grad_gamma_kernel",
+    ([&] {
+        grad_gamma_kernel<scalar_t><<<blocks_sum, threads_sum>>>(
+            dL_dout.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+            normalized.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+            bn_backward_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
+        );
+    }));
+
+    std::cout << "blocks grad_beta: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
+
+    AT_DISPATCH_FLOATING_TYPES(normalized.type(), "grad_beta_kernel",
+    ([&] {
+        grad_beta_kernel<scalar_t><<<blocks_sum, threads_sum>>>(
+            dL_dout.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+            bn_backward_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
+        );
+    }));
 
     // batch norm will use a even dispatched block size
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
@@ -323,9 +412,9 @@ torch::Tensor bn_backward_mlp_cuda(
             dx_norm_sum.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             normalized.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
             std_eps.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            dL_dinput.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
+            bn_backward_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
         );
     }));
 
-    return dL_dinput;
+    return bn_backward_output;
 }

@@ -35,12 +35,21 @@ b = cppcuda_bn.bn_forward_mlp(a, gamma, beta)
 normalized_cppcuda = b[: -1, :]
 std_eps = b[-1, :]
 
-print(normalized_python)
-print(normalized_cppcuda)
+print("normalized_python: ", normalized_python)
+print("normalized_cppcuda:", normalized_cppcuda)
 
-grad_input_python, _, _ = backward(grad_output, normalized_python, gamma, std_eps)
-grad_input_cpp = cppcuda_bn.bn_backward_mlp(grad_output, normalized_cppcuda, gamma, std_eps)
+grad_input_python, grad_gamma_python, grad_beta_python = backward(grad_output, normalized_python, gamma, std_eps)
+backward_cpp = cppcuda_bn.bn_backward_mlp(grad_output, normalized_cppcuda, gamma, std_eps)
+grad_input_cpp = backward_cpp[: -2, :]
+grad_gamma_cpp = backward_cpp[-2, :]
+grad_beta_cpp = backward_cpp[-1, :]
 
-print(grad_input_python)
-print(grad_input_cpp)
+print("grad_input_python:   ", grad_input_python)
+print("grad_input_cppcuda:  ", grad_input_cpp)
+
+print("grad_gamma_python:   ", grad_gamma_python)
+print("grad_gamma_cppcuda:  ", grad_gamma_cpp)
+
+print("grad_beta_python:    ", grad_beta_python)
+print("grad_beta_cppcuda:   ", grad_beta_cpp)
 
