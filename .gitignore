@@ -2,3 +2,5 @@ build/
 cppcuda_bn.egg-info/
 dated/
 dist/
+.idea/
+include/.ipynb_checkpoints/

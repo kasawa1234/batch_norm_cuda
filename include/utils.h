@@ -17,3 +17,16 @@ torch::Tensor bn_backward_mlp_cuda(
     const torch::Tensor gamma,
     const torch::Tensor std_eps
 );
+
+torch::Tensor bn_forward_conv_cuda(
+    const torch::Tensor X,
+    const torch::Tensor gamma,
+    const torch::Tensor beta
+);
+
+torch::Tensor bn_backward_conv_cuda(
+    const torch::Tensor dL_dout,
+    const torch::Tensor normalized,
+    const torch::Tensor gamma,
+    const torch::Tensor std_eps
+);
