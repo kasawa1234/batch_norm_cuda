@@ -30,3 +30,9 @@ torch::Tensor bn_backward_conv_cuda(
     const torch::Tensor gamma,
     const torch::Tensor std_eps
 );
+
+torch::Tensor bn_forward_mlp_sram_cuda(
+    const torch::Tensor X,
+    const torch::Tensor gamma,
+    const torch::Tensor beta
+);
