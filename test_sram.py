@@ -11,9 +11,10 @@ a = torch.randn([256, 4], device=device)
 grad_output = torch.randn([256, 4], device=device)
 gamma = torch.ones(4, device=device)
 beta = torch.zeros(4, device=device)
+BN = nn.BatchNorm1d(4, device=device, affine=False)
 
 start_time_python = time.time()
-normalized_python = nn.BatchNorm1d(4, device=device, affine=False)(a)
+normalized_python = BN(a)
 end_time_python = time.time()
 
 start_time_cppcuda = time.time()
