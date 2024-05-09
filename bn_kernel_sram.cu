@@ -289,8 +289,12 @@ __global__ void bn_forward_conv_sram_kernel(
 ){
     // batch size
     const int N = input_data.size(0);
+    const int C = input_data.size(1);
     const int h = input_data.size(2);   // height
     const int w = input_data.size(3);   // width
+    __shared__ scalar_t shared_sum[C];
+    __shared__ scalar_t shared_gamma[C];
+    __shared__ scalar_t shared_beta[C];
 
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.y * blockDim.y + threadIdx.y;
