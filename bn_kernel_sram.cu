@@ -326,7 +326,7 @@ torch::Tensor bn_forward_conv_sram_cuda(
     const dim3 threads_partial_sum(BLOCK_SIZE_HW, 1, 1);
     const dim3 blocks_partial_sum(num_hw, N, C);
 
-    std::cout << "blocks partial sum & sum2: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
+    // std::cout << "blocks partial sum & sum2: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(X.type(), "partial_sum_sum2_conv_sram_kernel",
     ([&] {
@@ -353,7 +353,7 @@ torch::Tensor bn_forward_conv_sram_cuda(
         const int num_hw_loop = num_h_loop * num_w_loop;
         const dim3 blocks_partial_sum_loop(num_hw_loop, N, C);
 
-        std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
+        // std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
 
         AT_DISPATCH_FLOATING_TYPES(X.type(), "partial_sum_conv_sram_kernel",
         ([&] {
@@ -377,7 +377,7 @@ torch::Tensor bn_forward_conv_sram_cuda(
     const dim3 threads_sum_std(BLOCK_SIZE_BATCH, BLOCK_SIZE_FEATURE);
     const dim3 blocks_sum_std((N + threads_sum_std.x - 1) / threads_sum_std.x, (C + threads_sum_std.y - 1) / threads_sum_std.y);
 
-    std::cout << "blocks sum & std: " << blocks_sum_std.x << ", " << blocks_sum_std.y << std::endl;
+    // std::cout << "blocks sum & std: " << blocks_sum_std.x << ", " << blocks_sum_std.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "sum_std_conv_sram_kernel",
@@ -395,7 +395,7 @@ torch::Tensor bn_forward_conv_sram_cuda(
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
     const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
 
-    std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
+    // std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_conv_sram_kernel",

@@ -23,7 +23,7 @@ def bn2d_backward(grad_output, normalized, gamma, std_eps):
 
 
 device = 'cuda:0'
-shape = [256, 4, 15, 300]
+shape = [256, 4, 32, 300]
 
 a = torch.randn(shape, device=device)
 gamma = torch.ones(4, device=device)
