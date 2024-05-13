@@ -106,14 +106,14 @@ torch::Tensor bn_forward_mlp_cuda(
     // X: (n, c), n is parallel
     const int N = X.size(0);
     const int C = X.size(1);
-    std::cout << N << ", " << C << std::endl;
+    // std::cout << N << ", " << C << std::endl;
 
     torch::Tensor mean = torch::zeros({C}, X.options());
     
     const dim3 threads_mean(BLOCK_SIZE_BATCH, BLOCK_SIZE_FEATURE);
     const dim3 blocks_mean((N + threads_mean.x - 1) / threads_mean.x, (C + threads_mean.y - 1) / threads_mean.y);
 
-    std::cout << "blocks mean: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // std::cout << "blocks mean: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "mean_kernel",
@@ -129,7 +129,7 @@ torch::Tensor bn_forward_mlp_cuda(
     torch::Tensor batch_norm_out = torch::zeros({N + 1, C}, X.options());
 
     // standard share the same block size with mean
-    std::cout << "blocks std: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // std::cout << "blocks std: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "std_kernel",
@@ -145,7 +145,7 @@ torch::Tensor bn_forward_mlp_cuda(
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
     const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
 
-    std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
+    // std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_mlp_kernel",
@@ -342,7 +342,7 @@ torch::Tensor bn_backward_mlp_cuda(
 ){
     const int N = normalized.size(0);
     const int C = normalized.size(1);
-    std::cout << N << ", " << C << std::endl;
+    // std::cout << N << ", " << C << std::endl;
 
     torch::Tensor dx_sum = torch::zeros({C}, normalized.options());
 
@@ -350,7 +350,7 @@ torch::Tensor bn_backward_mlp_cuda(
     const dim3 threads_sum(BLOCK_SIZE_BATCH, BLOCK_SIZE_FEATURE);
     const dim3 blocks_sum((N + threads_sum.x - 1) / threads_sum.x, (C + threads_sum.y - 1) / threads_sum.y);
 
-    std::cout << "blocks dx_sum: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
+    // std::cout << "blocks dx_sum: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(normalized.type(), "dx_sum_kernel",
     ([&] {
@@ -363,7 +363,7 @@ torch::Tensor bn_backward_mlp_cuda(
 
     torch::Tensor dx_norm_sum = torch::zeros({C}, normalized.options());
 
-    std::cout << "blocks dx_norm_sum: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
+    // std::cout << "blocks dx_norm_sum: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(normalized.type(), "dx_norm_sum_kernel",
     ([&] {
@@ -378,7 +378,7 @@ torch::Tensor bn_backward_mlp_cuda(
     // bn_backward_output: grad_input + grad_gamma + grad_beta
     torch::Tensor bn_backward_output = torch::zeros({N + 2, C}, normalized.options());
 
-    std::cout << "blocks grad_gamma: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
+    // std::cout << "blocks grad_gamma: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(normalized.type(), "grad_gamma_kernel",
     ([&] {
@@ -389,7 +389,7 @@ torch::Tensor bn_backward_mlp_cuda(
         );
     }));
 
-    std::cout << "blocks grad_beta: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
+    // std::cout << "blocks grad_beta: " << blocks_sum.x << ", " << blocks_sum.y << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(normalized.type(), "grad_beta_kernel",
     ([&] {
@@ -403,7 +403,7 @@ torch::Tensor bn_backward_mlp_cuda(
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
     const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
 
-    std::cout << "blocks batch norm backwards: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
+    // std::cout << "blocks batch norm backwards: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(normalized.type(), "bn_backward_input_mlp_kernel",
     ([&] {
@@ -894,7 +894,9 @@ torch::Tensor bn_backward_conv_cuda(
 }
 
 
+// ————————————————————————————————————————————————————————————————————————
 /*                          Parallel Conv Forward                          */
+// ————————————————————————————————————————————————————————————————————————
 
 
 template <typename scalar_t>
@@ -1561,7 +1563,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
     const dim3 threads_partial_sum(BLOCK_SIZE_HW, 1, 1);
     const dim3 blocks_partial_sum(num_hw, N, C);
 
-    std::cout << "blocks partial dx_sum: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
+    // std::cout << "blocks partial dx_sum: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "dx_sum_conv_parallel_hw_kernel",
     ([&] {
@@ -1589,7 +1591,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
         const int num_hw_loop = num_h_loop * num_w_loop;
         const dim3 blocks_partial_sum_loop(num_hw_loop, N, C);
 
-        std::cout << "blocks partial dx_sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
+        // std::cout << "blocks partial dx_sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
 
         AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "partial_sum_conv_parallel_kernel",
         ([&] {
@@ -1611,7 +1613,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
     const dim3 threads_mean(BLOCK_SIZE_BATCH, BLOCK_SIZE_FEATURE);
     const dim3 blocks_mean((N + threads_mean.x - 1) / threads_mean.x, (C + threads_mean.y - 1) / threads_mean.y);
 
-    std::cout << "blocks dx_sum final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // std::cout << "blocks dx_sum final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "dx_sum_conv_parallel_n_kernel",
@@ -1627,7 +1629,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
 
     // dx_norm_sum
 
-    std::cout << "blocks partial dx_norm_sum: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
+    // std::cout << "blocks partial dx_norm_sum: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "dx_norm_sum_conv_parallel_hw_kernel",
     ([&] {
@@ -1657,7 +1659,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
         const int num_hw_loop = num_h_loop * num_w_loop;
         const dim3 blocks_partial_sum_loop(num_hw_loop, N, C);
 
-        std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
+        // std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
 
         AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "partial_sum_conv_parallel_kernel",
         ([&] {
@@ -1676,7 +1678,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
 
     torch::Tensor dx_norm_sum = torch::zeros({C}, dL_dout.options());
 
-    std::cout << "blocks dx_norm_sum final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // std::cout << "blocks dx_norm_sum final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "dx_sum_conv_parallel_n_kernel",
@@ -1692,7 +1694,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
 
     // grad_gamma
 
-    std::cout << "blocks partial grad_gamma: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
+    // std::cout << "blocks partial grad_gamma: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "grad_gamma_conv_parallel_hw_kernel",
     ([&] {
@@ -1721,7 +1723,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
         const int num_hw_loop = num_h_loop * num_w_loop;
         const dim3 blocks_partial_sum_loop(num_hw_loop, N, C);
 
-        std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
+        // std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
 
         AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "partial_sum_conv_parallel_kernel",
         ([&] {
@@ -1740,7 +1742,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
 
     torch::Tensor bn_backward_output = torch::zeros({N + 2, C, H, W}, dL_dout.options());
 
-    std::cout << "blocks grad_gamma final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // std::cout << "blocks grad_gamma final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "grad_gamma_conv_parallel_n_kernel",
@@ -1756,7 +1758,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
 
 
     // grad_beta
-    std::cout << "blocks partial grad_beta: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
+    // std::cout << "blocks partial grad_beta: " << blocks_partial_sum.x << ", " << blocks_partial_sum.y << ", " << blocks_partial_sum.z << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "grad_beta_conv_parallel_hw_kernel",
     ([&] {
@@ -1784,7 +1786,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
         const int num_hw_loop = num_h_loop * num_w_loop;
         const dim3 blocks_partial_sum_loop(num_hw_loop, N, C);
 
-        std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
+        // std::cout << "blocks partial sum in loop: " << blocks_partial_sum_loop.x << ", " << blocks_partial_sum_loop.y << ", " << blocks_partial_sum_loop.z << std::endl;
 
         AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "partial_sum_conv_parallel_kernel",
         ([&] {
@@ -1801,7 +1803,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
         valid_w = num_w_loop;
     }
 
-    std::cout << "blocks grad_gamma final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
+    // std::cout << "blocks grad_gamma final: " << blocks_mean.x << ", " << blocks_mean.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(dL_dout.type(), "grad_beta_conv_parallel_n_kernel",
@@ -1817,7 +1819,7 @@ torch::Tensor bn_backward_conv_parallel_cuda(
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
     const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
 
-    std::cout << "blocks batch norm backwards: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
+    // std::cout << "blocks batch norm backwards: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
 
     AT_DISPATCH_FLOATING_TYPES(normalized.type(), "bn_backward_input_conv_kernel",
     ([&] {

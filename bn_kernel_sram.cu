@@ -81,7 +81,7 @@ torch::Tensor bn_forward_mlp_sram_cuda(
     // X: (n, c), n is parallel
     const int N = X.size(0);
     const int C = X.size(1);
-    std::cout << N << ", " << C << std::endl;
+    // std::cout << N << ", " << C << std::endl;
 
     // calculate sum and std
     torch::Tensor sum = torch::zeros({C}, X.options());
@@ -91,7 +91,7 @@ torch::Tensor bn_forward_mlp_sram_cuda(
     const dim3 threads_sum_std(BLOCK_SIZE_BATCH, BLOCK_SIZE_FEATURE);
     const dim3 blocks_sum_std((N + threads_sum_std.x - 1) / threads_sum_std.x, (C + threads_sum_std.y - 1) / threads_sum_std.y);
 
-    std::cout << "blocks sum_std: " << blocks_sum_std.x << ", " << blocks_sum_std.y << std::endl;
+    // std::cout << "blocks sum_std: " << blocks_sum_std.x << ", " << blocks_sum_std.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "sum_std_kernel",
@@ -108,7 +108,7 @@ torch::Tensor bn_forward_mlp_sram_cuda(
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
     const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
 
-    std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
+    // std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_mlp_kernel",
@@ -292,9 +292,6 @@ __global__ void bn_forward_conv_sram_kernel(
     const int C = input_data.size(1);
     const int h = input_data.size(2);   // height
     const int w = input_data.size(3);   // width
-    __shared__ scalar_t shared_sum[C];
-    __shared__ scalar_t shared_gamma[C];
-    __shared__ scalar_t shared_beta[C];
 
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.y * blockDim.y + threadIdx.y;

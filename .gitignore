@@ -5,3 +5,4 @@ dist/
 .idea/
 include/.ipynb_checkpoints/
 output/
+test_scripts/__pycache__/

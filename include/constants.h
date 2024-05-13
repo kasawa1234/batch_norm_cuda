@@ -12,6 +12,6 @@
 #define BLOCK_SIZE_DEFAULT 256
 
 
-#define BLOCK_SIZE_HW 256
-#define BLOCK_SIZE_H 16
-#define BLOCK_SIZE_W 16
+#define BLOCK_SIZE_HW 1024
+#define BLOCK_SIZE_H 32
+#define BLOCK_SIZE_W 32
