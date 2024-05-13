@@ -7,6 +7,10 @@
 #define BLOCK_SIZE_BN_X 16
 #define BLOCK_SIZE_BN_Y 16
 
+// parallel batch norm forward
+#define BLOCK_SIZE_BN_HW 32
+#define BLOCK_SIZE_BN_BATCH 16
+
 
 #define EPSILON 1e-5
 #define BLOCK_SIZE_DEFAULT 256
