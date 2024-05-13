@@ -4,3 +4,4 @@ dated/
 dist/
 .idea/
 include/.ipynb_checkpoints/
+output/
