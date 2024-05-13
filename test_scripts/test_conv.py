@@ -20,7 +20,7 @@ for i in range(iteration):
     #     np.random.randint(1, 513),
     #     np.random.randint(1, 513)
     # ]
-    shape_conv = [256, 8, 32, 300]
+    shape_conv = [256, 8, 32, 32]
     a = torch.randn(shape_conv, device=device)
     gamma = torch.ones(shape_conv[1], device=device)
     beta = torch.zeros(shape_conv[1], device=device)
@@ -47,6 +47,6 @@ for i in range(iteration):
         time_conv += end_cppcuda - start_cppcuda
         time_conv_parallel += end_cppcuda_parallel - start_cppcuda_parallel
         time_conv_sram += end_cppcuda_sram - start_cppcuda_sram
-    # print(end_time_python - start_time_python, end_cppcuda - start_cppcuda, end_cppcuda_parallel - start_cppcuda_parallel, end_cppcuda_sram - start_cppcuda_sram)
+    print(end_time_python - start_time_python, end_cppcuda - start_cppcuda, end_cppcuda_parallel - start_cppcuda_parallel, end_cppcuda_sram - start_cppcuda_sram)
 
 print(time_python, time_conv, time_conv_parallel, time_conv_sram)
