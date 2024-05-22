@@ -691,8 +691,8 @@ __global__ void bn_backward_input_conv_parallel_kernel(
 
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.z * blockDim.z + threadIdx.z;
-    const int h = blockIdx.z / block_num_width;
-    const int w = (blockIdx.z - h * block_num_width) * blockDim.z + threadIdx.z;
+    const int h = blockIdx.y / block_num_width;
+    const int w = (blockIdx.y - h * block_num_width) * blockDim.y + threadIdx.y;
 
     if (n >= normalized.size(0) || c >= normalized.size(1)) return;
 
