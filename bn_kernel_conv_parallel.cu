@@ -688,6 +688,8 @@ __global__ void bn_backward_input_conv_parallel_kernel(
     const int block_num_width
 ){
     const int N = normalized.size(0);
+    const int H = dL_dout.size(2);      // height  
+    const int W = dL_dout.size(3);      // width
 
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.z * blockDim.z + threadIdx.z;
@@ -696,7 +698,7 @@ __global__ void bn_backward_input_conv_parallel_kernel(
 
     if (n >= normalized.size(0) || c >= normalized.size(1)) return;
 
-    dL_dinput[n][c][h][w] = (N * h * w * dL_dout[n][c][h][w] * gamma[c] - dx_sum[c] - normalized[n][c][h][w] * dx_norm_sum[c]) / (N * h * w * std_eps[c]);
+    dL_dinput[n][c][h][w] = (N * H * W * dL_dout[n][c][h][w] * gamma[c] - dx_sum[c] - normalized[n][c][h][w] * dx_norm_sum[c]) / (N * H * W * std_eps[c]);
 }
 
 
