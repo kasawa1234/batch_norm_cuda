@@ -335,8 +335,8 @@ __global__ void grad_beta_conv_kernel(
     const int thread_id_n = threadIdx.x;
     const int thread_id_c = threadIdx.y;
 
-    const int h = dL_dout.size(2);   //height
-    const int w = dL_dout.size(3);   //width
+    const int h = dL_dout.size(2);   // height
+    const int w = dL_dout.size(3);   // width
 
     // if the loc cover our data, load in shared memory
     if (n < dL_dout.size(0) && c < dL_dout.size(1)){

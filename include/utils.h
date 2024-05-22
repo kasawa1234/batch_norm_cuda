@@ -36,6 +36,12 @@ torch::Tensor bn_forward_conv_parallel_cuda(
     const torch::Tensor beta
 );
 
+torch::Tensor bn_forward_conv_flatten_cuda(
+    const torch::Tensor X,
+    const torch::Tensor gamma,
+    const torch::Tensor beta
+);
+
 torch::Tensor bn_forward_conv_sram_cuda(
     const torch::Tensor X,
     const torch::Tensor gamma,

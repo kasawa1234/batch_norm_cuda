@@ -25,7 +25,6 @@ device = 'cuda:0'
 shape = [256, 4, 32, 32]
 
 a = torch.randn(shape, device=device)
-print(a[:, 0, :, :].mean(), a[:, 1, :, :].mean(), a[:, 2, :, :].mean(), a[:, 3, :, :].mean())
 gamma = torch.ones(4, device=device)
 beta = torch.zeros(4, device=device)
 BN = nn.BatchNorm2d(4, device=device, affine=False)
@@ -42,20 +41,25 @@ c = cppcuda_bn.bn_forward_conv_parallel(a, gamma, beta)
 std_eps_cppcuda_parallel = c[-1, :, 0, 0].contiguous()
 normalized_cppcuda_parallel = c[: -1, :, :, :]
 
-d = cppcuda_bn.bn_forward_conv_sram(a, gamma, beta)
-std_eps_cppcuda_sram = (d[-1, :, 0, 0] / (256 * 32 * 32)).contiguous()
-normalized_cppcuda_sram = d[: -1, :, :, :]
+d = cppcuda_bn.bn_forward_conv_flatten(a, gamma, beta)
+std_eps_cppcuda_flatten = d[-1, :, 0, 0].contiguous()
+normalized_cppcuda_flatten = d[: -1, :, :, :]
+
+e = cppcuda_bn.bn_forward_conv_sram(a, gamma, beta)
+std_eps_cppcuda_sram = (e[-1, :, 0, 0] / (shape[0] * shape[2] * shape[3])).contiguous()
+normalized_cppcuda_sram = e[: -1, :, :, :]
 
 
 print("______________________________ normalized ______________________________")
 print(abs(normalized_cppcuda - normalized_python).max())
-print(abs(normalized_cppcuda - normalized_cppcuda_parallel).max())
-print(abs(normalized_cppcuda - normalized_cppcuda_sram).max())
+print(abs(normalized_cppcuda_parallel - normalized_python).max())
+print(abs(normalized_cppcuda_flatten - normalized_python).max())
+print(abs(normalized_cppcuda_sram - normalized_python).max())
 
 print("______________________________  std_eps  _______________________________")
 print(abs(std_eps_cppcuda_parallel - std_eps_cppcuda).max())
+print(abs(std_eps_cppcuda_flatten - std_eps_cppcuda).max())
 print(abs(std_eps_cppcuda_sram - std_eps_cppcuda).max())
-print(abs(std_eps_cppcuda_sram - std_eps_cppcuda_parallel).max())
 
 
 # backward
@@ -80,7 +84,7 @@ print(abs(grad_input_cpp - grad_input_python).max())
 print(abs(grad_input_cpp_parallel - grad_input_python).max())
 
 print("______________________________ grad_gamma ______________________________")
-print(grad_gamma_cpp - grad_beta_python)
+print(grad_gamma_cpp - grad_gamma_python)
 print(grad_gamma_cpp_parallel - grad_gamma_python)
 
 print("______________________________ grad_beta _______________________________")

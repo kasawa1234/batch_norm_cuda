@@ -60,8 +60,8 @@ template <typename scalar_t>
 __global__ void mean_conv_parallel_kernel(
     torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> input_data,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> output_data,
-    const int h,
-    const int w
+    const int H,
+    const int W
 ){
     // declare a shared memory space as same as one block
     __shared__ scalar_t shared_memory[BLOCK_SIZE_BATCH][BLOCK_SIZE_FEATURE];
@@ -87,7 +87,7 @@ __global__ void mean_conv_parallel_kernel(
     
     // after this for loop, all should be set, so dump the data and calculate the mean
     if (thread_id_n == 0) {
-        output_data[c] = shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0) * h * w);
+        output_data[c] = shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0) * H * W);
     }
 }
 
@@ -140,8 +140,8 @@ __global__ void std_conv_parallel_kernel(
     torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> input_data,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> mean,
     torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> batch_norm_output,
-    const int h,
-    const int w
+    const int H,
+    const int W
 ){
     // declare a shared memory space as same as one block
     __shared__ scalar_t shared_memory[BLOCK_SIZE_BATCH][BLOCK_SIZE_FEATURE];
@@ -168,7 +168,7 @@ __global__ void std_conv_parallel_kernel(
     // after this for loop, all should be set, so dump the data and calculate the mean
     if (thread_id_n == 0) {
         const int N = input_data.size(0);
-        batch_norm_output[N][c][0][0] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(N * h * w) - mean[c] * mean[c] + EPSILON);
+        batch_norm_output[N][c][0][0] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(N * H * W) - mean[c] * mean[c] + EPSILON);
     }
 }
 
@@ -188,7 +188,7 @@ __global__ void bn_forward_conv_parallel_kernel(
     const int h = blockIdx.y / block_num_width;
     const int w = (blockIdx.y - h * block_num_width) * blockDim.y + threadIdx.y;
 
-    if (n >= input_data.size(0) || c >= input_data.size(1)) return;
+    if (n >= input_data.size(0) || c >= input_data.size(1) || h >= input_data.size(2) || w >= input_data.size(3)) return;
 
     output_data[n][c][h][w] = gamma[c] * (input_data[n][c][h][w] - mean[c]) / output_data[N][c][0][0] + beta[c];
 }
@@ -696,7 +696,7 @@ __global__ void bn_backward_input_conv_parallel_kernel(
     const int h = blockIdx.y / block_num_width;
     const int w = (blockIdx.y - h * block_num_width) * blockDim.y + threadIdx.y;
 
-    if (n >= normalized.size(0) || c >= normalized.size(1)) return;
+    if (n >= normalized.size(0) || c >= normalized.size(1) || h >= normalized.size(2) || w >= normalized.size(3)) return;
 
     dL_dinput[n][c][h][w] = (N * H * W * dL_dout[n][c][h][w] * gamma[c] - dx_sum[c] - normalized[n][c][h][w] * dx_norm_sum[c]) / (N * H * W * std_eps[c]);
 }

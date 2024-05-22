@@ -27,6 +27,10 @@ print("Running conv_parallel...")
 cuda_time, _ = show_time(cppcuda_bn.bn_forward_conv_parallel, a, gamma, beta)
 print("Cuda time:  {:.3f}us".format(np.mean(cuda_time)))
 
+print("Running conv_flatten...")
+cuda_time, _ = show_time(cppcuda_bn.bn_forward_conv_flatten, a, gamma, beta)
+print("Cuda time:  {:.3f}us".format(np.mean(cuda_time)))
+
 print("Running conv_sram...")
 cuda_time, _ = show_time(cppcuda_bn.bn_forward_conv_sram, a, gamma, beta)
 print("Cuda time:  {:.3f}us".format(np.mean(cuda_time)))

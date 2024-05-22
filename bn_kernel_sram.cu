@@ -297,7 +297,7 @@ __global__ void bn_forward_conv_sram_kernel(
     const int h = blockIdx.y / block_num_width;
     const int w = (blockIdx.y - h * block_num_width) * blockDim.y + threadIdx.y;
 
-    if (n >= input_data.size(0) || c >= input_data.size(1)) return;
+    if (n >= input_data.size(0) || c >= input_data.size(1) || h >= input_data.size(2) || w >= input_data.size(3)) return;
 
     output_data[n][c][h][w] = gamma[c] * (N * H * W * input_data[n][c][h][w] - sum[c]) / output_data[N][c][0][0] + beta[c];
 }

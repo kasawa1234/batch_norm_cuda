@@ -64,6 +64,18 @@ torch::Tensor bn_forward_conv_parallel(
     return bn_forward_conv_parallel_cuda(X, gamma, beta);
 }
 
+torch::Tensor bn_forward_conv_flatten(
+    const torch::Tensor X,
+    const torch::Tensor gamma,
+    const torch::Tensor beta
+){
+    CHECK_INPUT(X);
+    CHECK_INPUT(gamma);
+    CHECK_INPUT(beta);
+    
+    return bn_forward_conv_flatten_cuda(X, gamma, beta);
+}
+
 torch::Tensor bn_forward_conv_sram(
     const torch::Tensor X,
     const torch::Tensor gamma,
@@ -109,6 +121,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
     m.def("bn_forward_mlp_sram", &bn_forward_mlp_sram, "");
     m.def("bn_backward_mlp", &bn_backward_mlp, "");
     m.def("bn_forward_conv", &bn_forward_conv, "");
+    m.def("bn_forward_conv_flatten", &bn_forward_conv_flatten, "");
     m.def("bn_forward_conv_parallel", &bn_forward_conv_parallel, "");
     m.def("bn_forward_conv_sram", &bn_forward_conv_sram, "");
     m.def("bn_backward_conv", &bn_backward_conv, "");
