@@ -38,14 +38,46 @@ class BatchNorm1d(nn.Module):
         
     def forward(self, x):
         if self.training:
-            # 在训练模式下，运行BatchNormFunction的前向传播并计算新的running值
             y = BatchNorm1dFunction.apply(x, self.gamma, self.beta)
-            
         else:
-            # 在评估模式下，直接使用running_mean和running_var进行归一化
-            # y = self.gamma * (x - self.running_mean) / torch.sqrt(self.running_var + self.eps) + self.beta
             y = BatchNorm1dFunction.apply(x, self.gamma, self.beta)
         return y
+
+class BatchNorm1dSramFunction(Function):
+    @staticmethod
+    def forward(ctx, x, gamma, beta):
+
+        y = cppcuda_bn.bn_forward_mlp_sram(x, gamma, beta)
+        output = y[:-1, :]
+        ctx.save_for_backward(x, y, gamma)
+        return output
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, y, gamma = ctx.saved_tensors
+        x_normalized = y[:-1, :]
+        std = y[-1, :]
+        std = std.contiguous()  # To make std contiguous in memory
+        backward = cppcuda_bn.bn_backward_mlp_sram(grad_output, x_normalized, gamma, std)
+        grad_input = backward[:-2, :]
+        grad_gamma = backward[-2, :]
+        grad_beta = backward[-1:, :]
+        return grad_input, grad_gamma, grad_beta
+    
+class BatchNorm1dSram(nn.Module):
+    def __init__(self, num_features):
+        super(BatchNorm1dSram, self).__init__()
+        self.num_features = num_features
+        self.gamma = nn.Parameter(torch.ones(num_features))
+        self.beta = nn.Parameter(torch.zeros(num_features))
+        
+    def forward(self, x):
+        if self.training:
+            y = BatchNorm1dSramFunction.apply(x, self.gamma, self.beta)
+        else:
+            y = BatchNorm1dSramFunction.apply(x, self.gamma, self.beta)
+        return y
+
 
 class MLP_Python(nn.Module):
     def __init__(self):
@@ -57,7 +89,6 @@ class MLP_Python(nn.Module):
         self.fc3 = nn.Linear(256, 10)
 
     def forward(self, x):
-        # 将图像展平为一维向量
         x = x.view(-1, 28 * 28)
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.fc2(x)))
@@ -74,7 +105,22 @@ class MLP_Cuda(nn.Module):
         self.fc3 = nn.Linear(256, 10)
 
     def forward(self, x):
-        # 将图像展平为一维向量
+        x = x.view(-1, 28 * 28)
+        x = F.relu(self.bn1(self.fc1(x)))
+        x = F.relu(self.bn2(self.fc2(x)))
+        x = self.fc3(x)
+        return x
+    
+class MLP_Cuda_Sram(nn.Module):
+    def __init__(self):
+        super(MLP_Cuda_Sram, self).__init__()
+        self.fc1 = nn.Linear(28 * 28, 512)
+        self.bn1 = BatchNorm1dSram(512)  
+        self.fc2 = nn.Linear(512, 256)
+        self.bn2 = BatchNorm1dSram(256)  
+        self.fc3 = nn.Linear(256, 10)
+
+    def forward(self, x):
         x = x.view(-1, 28 * 28)
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.fc2(x)))
@@ -92,11 +138,13 @@ test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 model_mlp_python = MLP_Python().to(device)
 model_mlp_cuda = MLP_Cuda().to(device)
-
+model_mlp_cuda_sram = MLP_Cuda_Sram().to(device)
 
 criterion = nn.CrossEntropyLoss()
 optimizer_python = optim.Adam(model_mlp_python.parameters(), lr=0.001)
 optimizer_cuda = optim.Adam(model_mlp_cuda.parameters(), lr=0.001)
+optimizer_cuda_sram = optim.Adam(model_mlp_cuda_sram.parameters(), lr=0.001)
+
 
 epochs = 5
 
@@ -136,22 +184,53 @@ def test(model, test_loader):
     accuracy = correct / total * 100
     print('Test Accuracy: {:.2f}%'.format(accuracy))
 
+print("Running Pytorch Model......")
+torch.cuda.synchronize(device="cuda:0")
 start_python_train = time.time()
 train(model_mlp_python, train_loader=train_loader, optimizer = optimizer_python, criterion = criterion, epochs=epochs)
+torch.cuda.synchronize(device="cuda:0")
 end_python_train = time.time()
 
+print("Running CUDA MLP Model......")
+torch.cuda.synchronize(device="cuda:0")
 start_cuda_train = time.time()
 train(model_mlp_cuda, train_loader=train_loader, optimizer = optimizer_cuda, criterion = criterion, epochs=epochs)
+torch.cuda.synchronize(device="cuda:0")
 end_cuda_train = time.time()
 
+print("Running CUDA SRAM Model......")
+torch.cuda.synchronize(device="cuda:0")
+start_cuda_sram_train = time.time()
+train(model_mlp_cuda_sram, train_loader, optimizer_cuda_sram, criterion = criterion, epochs=epochs)
+torch.cuda.synchronize(device="cuda:0")
+end_cuda_sram_train = time.time()
+
+print("Running Pytorch Model Test......")
+torch.cuda.synchronize(device="cuda:0")
 start_python_test = time.time()
 test(model_mlp_python, test_loader)
+torch.cuda.synchronize(device="cuda:0")
 end_python_test = time.time()
 
+print("Running CUDA MLP Model Test......")
+torch.cuda.synchronize(device="cuda:0")
 start_cuda_test = time.time()
 test(model_mlp_cuda, test_loader)
+torch.cuda.synchronize(device="cuda:0")
 end_cuda_test = time.time()
 
-print(end_python_train - start_python_train, end_cuda_train - start_cuda_train)
-print(end_python_test - start_python_test, end_cuda_test - start_cuda_test)
+print("Running CUDA SRAM Model Test......")
+torch.cuda.synchronize(device="cuda:0")
+start_cuda_sram_test = time.time()
+test(model_mlp_cuda_sram, test_loader)
+torch.cuda.synchronize(device="cuda:0")
+end_cuda_sram_test = time.time()
 
+
+print(" Pytorch Model Train Time:{:.6f} s".format(end_python_train - start_python_train))
+print("CUDA MLP Model Train time:{:.6f} s".format(end_cuda_train - start_cuda_train))
+print("CUDA SRAM Model Train time:{:.6f} s".format(end_cuda_sram_train - start_cuda_sram_train))
+
+print(" Pytorch Model Test Time:{:.6f} s".format(end_python_test - start_python_test))
+print("CUDA MLP Model Test time:{:.6f} s".format(end_cuda_test - start_cuda_test))
+print("CUDA SRAM Model Test time:{:.6f} s".format(end_cuda_sram_test - start_cuda_sram_test))
