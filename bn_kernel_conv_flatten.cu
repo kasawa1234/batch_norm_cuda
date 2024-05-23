@@ -165,15 +165,17 @@ __global__ void bn_forward_conv_flatten_kernel(
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> mean,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> beta,
-    torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> output_data,
-    const int block_num_width
+    torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> output_data
 ){
     const int N = input_data.size(0);
+    const int H = input_data.size(2);
+    const int W = input_data.size(3);
 
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.z * blockDim.z + threadIdx.z;
-    const int h = blockIdx.y / block_num_width;
-    const int w = (blockIdx.y - h * block_num_width) * blockDim.y + threadIdx.y;
+    const int hw = blockIdx.y * blockDim.y + threadIdx.y;
+    const int h = hw / W;
+    const int w = hw - h * W;
 
     if (n >= input_data.size(0) || c >= input_data.size(1) || h >= input_data.size(2) || w >= input_data.size(3)) return;
 
@@ -298,8 +300,7 @@ torch::Tensor bn_forward_conv_flatten_cuda(
 
     // batch norm will use a even dispatched block size
     const dim3 threads_batch_norm(BLOCK_SIZE_BN_BATCH, BLOCK_SIZE_BN_HW, 1);
-    const int num_width = (W + threads_batch_norm.y - 1) / threads_batch_norm.y;
-    const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, num_width * H, C);
+    const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (HW + threads_batch_norm.y - 1) / threads_batch_norm.y, C);
 
     // launch the kernel
     AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_conv_flatten_kernel",
@@ -309,8 +310,7 @@ torch::Tensor bn_forward_conv_flatten_cuda(
             mean.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             gamma.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             beta.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            batch_norm_out.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
-            num_width
+            batch_norm_out.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>()
         );
     }));
 

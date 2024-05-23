@@ -19,3 +19,5 @@
 #define BLOCK_SIZE_HW 1024
 #define BLOCK_SIZE_H 32
 #define BLOCK_SIZE_W 32
+
+#define MAX_C 1024

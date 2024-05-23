@@ -93,8 +93,7 @@ __global__ void std_conv_kernel(
     
     // after this for loop, all should be set, so dump the data and calculate the std
     if (thread_id_n == 0) {
-                batch_norm_output[N][c][0][0] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0) * h * w + EPSILON));
-
+        batch_norm_output[N][c][0][0] = sqrt(shared_memory[0][thread_id_c] / static_cast<scalar_t>(input_data.size(0) * h * w + EPSILON));
     }
 }
 
@@ -376,8 +375,8 @@ __global__ void bn_backward_input_conv_kernel(
     torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> dL_dinput
 ){
     const int N = normalized.size(0);
-    const int h = dL_dout.size(2);   //height  
-    const int w = dL_dout.size(3);   //width
+    const int h = dL_dout.size(2);   // height  
+    const int w = dL_dout.size(3);   // width
 
     const int n = blockIdx.x * blockDim.x + threadIdx.x;
     const int c = blockIdx.y * blockDim.y + threadIdx.y;

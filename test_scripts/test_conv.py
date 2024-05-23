@@ -1,24 +1,8 @@
 import torch
-import time
 import torch.nn as nn
 import cppcuda_bn
 
-
-def bn2d_backward(grad_output, normalized, gamma, std_eps):
-    N, C, H, W = grad_output.shape
-
-    # 梯度的均值和方差的计算
-    grad_gamma = torch.sum(grad_output * normalized, dim=[0, 2, 3], keepdim=True)
-    grad_beta = torch.sum(grad_output, dim=[0, 2, 3], keepdim=True)
-
-    # dx_ 是对输入数据的梯度的中间变量
-    dx_ = gamma.view(1, C, 1, 1) * grad_output
-
-    grad_input = N * H * W * dx_ - dx_.sum(dim=[0, 2, 3], keepdim = True) - normalized * (dx_ * normalized).sum(dim=[0, 2, 3], keepdim=True)
-    grad_input /= (N * H * W * std_eps.view(1, C, 1, 1))
-
-    # 返回梯度
-    return grad_input, grad_gamma.flatten(), grad_beta.flatten()
+from utils import bn2d_backward
 
 
 device = 'cuda:0'
@@ -46,15 +30,16 @@ std_eps_cppcuda_flatten = d[-1, :, 0, 0].contiguous()
 normalized_cppcuda_flatten = d[: -1, :, :, :]
 
 e = cppcuda_bn.bn_forward_conv_sram(a, gamma, beta)
-std_eps_cppcuda_sram = (e[-1, :, 0, 0] / (shape[0] * shape[2] * shape[3])).contiguous()
+std_eps_cppcuda_sram_N = e[-1, :, 0, 0].contiguous()
+std_eps_cppcuda_sram = std_eps_cppcuda_sram_N / (shape[0] * shape[2] * shape[3])
 normalized_cppcuda_sram = e[: -1, :, :, :]
 
 
 print("______________________________ normalized ______________________________")
-print(abs(normalized_cppcuda - normalized_python).max())
-print(abs(normalized_cppcuda_parallel - normalized_python).max())
-print(abs(normalized_cppcuda_flatten - normalized_python).max())
-print(abs(normalized_cppcuda_sram - normalized_python).max())
+print("cppcuda:", abs(normalized_cppcuda - normalized_python).max())
+print("parallel:", abs(normalized_cppcuda_parallel - normalized_python).max())
+print("flatten:", abs(normalized_cppcuda_flatten - normalized_python).max())
+print("sram:", abs(normalized_cppcuda_sram - normalized_python).max())
 
 print("______________________________  std_eps  _______________________________")
 print(abs(std_eps_cppcuda_parallel - std_eps_cppcuda).max())
@@ -79,14 +64,23 @@ grad_gamma_cpp_parallel = backward_cpp_parallel[-2, :, 0, 0]
 grad_beta_cpp_parallel = backward_cpp_parallel[-1, :, 0, 0]
 
 
+backward_cpp_sram = cppcuda_bn.bn_backward_conv_parallel(grad_output, normalized_cppcuda_parallel, gamma, std_eps_cppcuda_sram_N)
+grad_input_cpp_sram = backward_cpp_parallel[: -2, :, :, :]
+grad_gamma_cpp_sram = backward_cpp_parallel[-2, :, 0, 0]
+grad_beta_cpp_sram = backward_cpp_parallel[-1, :, 0, 0]
+
+
 print("______________________________ grad_input ______________________________")
-print(abs(grad_input_cpp - grad_input_python).max())
-print(abs(grad_input_cpp_parallel - grad_input_python).max())
+print("cppcuda input:", abs(grad_input_cpp - grad_input_python).max())
+print("parallel input:", abs(grad_input_cpp_parallel - grad_input_python).max())
+print("sram input:", abs(grad_input_cpp_sram - grad_input_python).max())
 
 print("______________________________ grad_gamma ______________________________")
-print(grad_gamma_cpp - grad_gamma_python)
-print(grad_gamma_cpp_parallel - grad_gamma_python)
+print("cppcuda gamma:", grad_gamma_cpp - grad_gamma_python)
+print("parallel gamma:", grad_gamma_cpp_parallel - grad_gamma_python)
+print("sram gamma:", grad_gamma_cpp_sram - grad_gamma_python)
 
 print("______________________________ grad_beta _______________________________")
-print(grad_beta_cpp - grad_beta_python)
-print(grad_beta_cpp_parallel - grad_beta_python)
+print("cppcuda beta:", grad_beta_cpp - grad_beta_python)
+print("parallel beta:", grad_beta_cpp_parallel - grad_beta_python)
+print("sram beta:", grad_beta_cpp_sram - grad_beta_python)
