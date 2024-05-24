@@ -6,6 +6,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from torch.autograd import Function
 import cppcuda_bn
+import matplotlib.pyplot as plt
 import time
 
 class BatchNorm1dFunction(Function):
@@ -145,15 +146,19 @@ optimizer_python = optim.Adam(model_mlp_python.parameters(), lr=0.001)
 optimizer_cuda = optim.Adam(model_mlp_cuda.parameters(), lr=0.001)
 optimizer_cuda_sram = optim.Adam(model_mlp_cuda_sram.parameters(), lr=0.001)
 
+loss_list_python = []
+loss_list_cuda = []
+loss_list_cuda_sram = []
 
 epochs = 5
 
 
 # train model
-def train(model, train_loader, optimizer, criterion, epochs):
+def train(model, train_loader, optimizer, criterion, epochs, loss_list):
     model.train()
     for epoch in range(epochs):
         total_correct_train, total_train = 0, 0
+        total_loss = 0
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
@@ -161,11 +166,14 @@ def train(model, train_loader, optimizer, criterion, epochs):
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
+            total_loss += loss.item()
             _, predicted_train = torch.max(output.data, 1)
             total_train += target.size(0)
             total_correct_train += (predicted_train == target).sum().item()
+        epoch_loss = total_loss / len(train_loader)
+        loss_list.append(epoch_loss)
         accuracy_train = total_correct_train / total_train * 100
-        print('Epoch {}: Loss: {:.6f}, Train Accuracy: {:.2f}%'.format(epoch + 1, loss.item(), accuracy_train))
+        print('Epoch {}: Loss: {:.6f}, Train Accuracy: {:.2f}%'.format(epoch + 1, epoch_loss, accuracy_train))
 
 # test model
 def test(model, test_loader):
@@ -184,53 +192,92 @@ def test(model, test_loader):
     accuracy = correct / total * 100
     print('Test Accuracy: {:.2f}%'.format(accuracy))
 
+def plot_loss(loss_list_python, loss_list_cuda, loss_list_cuda_sram):
+    plt.figure(figsize=(10, 5))
+    
+    plt.plot(loss_list_python, label='Python Model', marker='o')
+    
+    plt.plot(loss_list_cuda, label='CUDA MLP Model', marker='s')
+    
+    plt.plot(loss_list_cuda_sram, label='CUDA SRAM Model', marker='^')
+    
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss vs. Epoch for All Models')
+    plt.legend() 
+    plt.savefig('Training_Loss.png') 
+    plt.show()
+
+def plot_training_time(times, models):
+    plt.figure(figsize=(10, 6))
+    bar_plot = plt.bar(models, times, color=['blue', 'green', 'red'])
+    for i, v in enumerate(times):
+        plt.text(i, v + 0.1, f'{v:.2f}', ha='center', va='bottom')
+    
+    plt.xlabel('Model')
+    plt.ylabel('Training Time (s)')
+    plt.title('Training Time for Different Models')
+    plt.xticks(models)
+    plt.savefig('Training_Time_Bar_Chart.png')
+    plt.show()
+
 print("Running Pytorch Model......")
 torch.cuda.synchronize(device="cuda:0")
 start_python_train = time.time()
-train(model_mlp_python, train_loader=train_loader, optimizer = optimizer_python, criterion = criterion, epochs=epochs)
+train(model_mlp_python, train_loader=train_loader, optimizer = optimizer_python, criterion = criterion, epochs=epochs, loss_list = loss_list_python)
 torch.cuda.synchronize(device="cuda:0")
 end_python_train = time.time()
 
 print("Running CUDA MLP Model......")
 torch.cuda.synchronize(device="cuda:0")
 start_cuda_train = time.time()
-train(model_mlp_cuda, train_loader=train_loader, optimizer = optimizer_cuda, criterion = criterion, epochs=epochs)
+train(model_mlp_cuda, train_loader=train_loader, optimizer = optimizer_cuda, criterion = criterion, epochs=epochs, loss_list = loss_list_cuda)
 torch.cuda.synchronize(device="cuda:0")
 end_cuda_train = time.time()
 
 print("Running CUDA SRAM Model......")
 torch.cuda.synchronize(device="cuda:0")
 start_cuda_sram_train = time.time()
-train(model_mlp_cuda_sram, train_loader, optimizer_cuda_sram, criterion = criterion, epochs=epochs)
+train(model_mlp_cuda_sram, train_loader, optimizer_cuda_sram, criterion = criterion, epochs=epochs, loss_list = loss_list_cuda_sram)
 torch.cuda.synchronize(device="cuda:0")
 end_cuda_sram_train = time.time()
 
-print("Running Pytorch Model Test......")
-torch.cuda.synchronize(device="cuda:0")
-start_python_test = time.time()
-test(model_mlp_python, test_loader)
-torch.cuda.synchronize(device="cuda:0")
-end_python_test = time.time()
+# print("Running Pytorch Model Test......")
+# torch.cuda.synchronize(device="cuda:0")
+# start_python_test = time.time()
+# test(model_mlp_python, test_loader)
+# torch.cuda.synchronize(device="cuda:0")
+# end_python_test = time.time()
 
-print("Running CUDA MLP Model Test......")
-torch.cuda.synchronize(device="cuda:0")
-start_cuda_test = time.time()
-test(model_mlp_cuda, test_loader)
-torch.cuda.synchronize(device="cuda:0")
-end_cuda_test = time.time()
+# print("Running CUDA MLP Model Test......")
+# torch.cuda.synchronize(device="cuda:0")
+# start_cuda_test = time.time()
+# test(model_mlp_cuda, test_loader)
+# torch.cuda.synchronize(device="cuda:0")
+# end_cuda_test = time.time()
 
-print("Running CUDA SRAM Model Test......")
-torch.cuda.synchronize(device="cuda:0")
-start_cuda_sram_test = time.time()
-test(model_mlp_cuda_sram, test_loader)
-torch.cuda.synchronize(device="cuda:0")
-end_cuda_sram_test = time.time()
+# print("Running CUDA SRAM Model Test......")
+# torch.cuda.synchronize(device="cuda:0")
+# start_cuda_sram_test = time.time()
+# test(model_mlp_cuda_sram, test_loader)
+# torch.cuda.synchronize(device="cuda:0")
+# end_cuda_sram_test = time.time()
 
+
+train_times = [
+    end_python_train - start_python_train,
+    end_cuda_train - start_cuda_train,
+    end_cuda_sram_train - start_cuda_sram_train
+]
+models = ['Pytorch Model', 'CUDA MLP Model', 'CUDA SRAM Model']
+plot_training_time(train_times, models)
 
 print(" Pytorch Model Train Time:{:.6f} s".format(end_python_train - start_python_train))
 print("CUDA MLP Model Train time:{:.6f} s".format(end_cuda_train - start_cuda_train))
 print("CUDA SRAM Model Train time:{:.6f} s".format(end_cuda_sram_train - start_cuda_sram_train))
 
-print(" Pytorch Model Test Time:{:.6f} s".format(end_python_test - start_python_test))
-print("CUDA MLP Model Test time:{:.6f} s".format(end_cuda_test - start_cuda_test))
-print("CUDA SRAM Model Test time:{:.6f} s".format(end_cuda_sram_test - start_cuda_sram_test))
+# print(" Pytorch Model Test Time:{:.6f} s".format(end_python_test - start_python_test))
+# print("CUDA MLP Model Test time:{:.6f} s".format(end_cuda_test - start_cuda_test))
+# print("CUDA SRAM Model Test time:{:.6f} s".format(end_cuda_sram_test - start_cuda_sram_test))
+
+plot_loss(loss_list_python, loss_list_cuda, loss_list_cuda_sram)
