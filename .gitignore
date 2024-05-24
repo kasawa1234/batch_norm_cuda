@@ -6,3 +6,4 @@ dist/
 include/.ipynb_checkpoints/
 output/
 test_scripts/__pycache__/
+save_figs/

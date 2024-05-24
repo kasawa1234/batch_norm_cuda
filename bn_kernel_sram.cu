@@ -14,9 +14,10 @@ Considering following accelerations:
 
 
 template <typename scalar_t>
-__global__ void sum_std_sram_kernel(
+__global__ void bn_forward_sum_std_sram_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> sum,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
+    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> beta,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> batch_norm_output
 ){
     const int N = input_data.size(0);
@@ -45,32 +46,39 @@ __global__ void sum_std_sram_kernel(
         }
         __syncthreads();        // wait, till all threads in this block reach
     }
-    
-    // calculate N * mean and N * std_eps
-    if (thread_id_n == 0) {
-        sum[c] = shared_memory[0][thread_id_c][0];
-        batch_norm_output[N][c] = sqrt(N * shared_memory[0][thread_id_c][1] - shared_memory[0][thread_id_c][0] * shared_memory[0][thread_id_c][0] + N * N * EPSILON);
-    }
-}
-
-template <typename scalar_t>
-__global__ void bn_forward_mlp_sram_kernel(
-    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> sum,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
-    torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> beta,
-    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output_data
-){
-    // batch size
-    const int N = input_data.size(0);
-
-    const int n = blockIdx.x * blockDim.x + threadIdx.x;
-    const int c = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (n >= input_data.size(0) || c >= input_data.size(1)) return;
 
-    output_data[n][c] = gamma[c] * (N * input_data[n][c] - sum[c]) / output_data[N][c] + beta[c];
+    const scalar_t std_eps_N = sqrt(N * shared_memory[0][thread_id_c][1] - shared_memory[0][thread_id_c][0] * shared_memory[0][thread_id_c][0] + N * N * EPSILON);
+
+    batch_norm_output[n][c] = gamma[c] * (N * input_data[n][c] - shared_memory[0][thread_id_c][0]) / std_eps_N + beta[c];
+    
+    // calculate N * mean and N * std_eps
+    if (thread_id_n == 0) {
+        // sum[c] = shared_memory[0][thread_id_c][0];
+        // batch_norm_output[N][c] = sqrt(N * shared_memory[0][thread_id_c][1] - shared_memory[0][thread_id_c][0] * shared_memory[0][thread_id_c][0] + N * N * EPSILON);
+        batch_norm_output[N][c] = std_eps_N;
+    }
 }
+
+// template <typename scalar_t>
+// __global__ void bn_forward_mlp_sram_kernel(
+//     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input_data,
+//     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> sum,
+//     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> gamma,
+//     torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits> beta,
+//     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> output_data
+// ){
+//     // batch size
+//     const int N = input_data.size(0);
+
+//     const int n = blockIdx.x * blockDim.x + threadIdx.x;
+//     const int c = blockIdx.y * blockDim.y + threadIdx.y;
+
+//     if (n >= input_data.size(0) || c >= input_data.size(1)) return;
+
+//     output_data[n][c] = gamma[c] * (N * input_data[n][c] - sum[c]) / output_data[N][c] + beta[c];
+// }
 
 
 torch::Tensor bn_forward_mlp_sram_cuda(
@@ -84,7 +92,7 @@ torch::Tensor bn_forward_mlp_sram_cuda(
     // std::cout << N << ", " << C << std::endl;
 
     // calculate sum and std
-    torch::Tensor sum = torch::zeros({C}, X.options());
+    // torch::Tensor sum = torch::zeros({C}, X.options());
     // batch_norm_out: bn_forward + N * std_eps
     torch::Tensor batch_norm_out = torch::zeros({N + 1, C}, X.options());
     
@@ -94,33 +102,34 @@ torch::Tensor bn_forward_mlp_sram_cuda(
     // std::cout << "blocks sum_std: " << blocks_sum_std.x << ", " << blocks_sum_std.y << std::endl;
 
     // launch the kernel
-    AT_DISPATCH_FLOATING_TYPES(X.type(), "sum_std_kernel",
+    AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_sum_std_sram_kernel",
     ([&] {
-        sum_std_sram_kernel<scalar_t><<<blocks_sum_std, threads_sum_std>>>(
+        bn_forward_sum_std_sram_kernel<scalar_t><<<blocks_sum_std, threads_sum_std>>>(
             X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-            sum.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
-            batch_norm_out.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
-        );
-    }));
-
-
-    // batch norm will use a even dispatched block size
-    const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
-    const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
-
-    // std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
-
-    // launch the kernel
-    AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_mlp_kernel",
-    ([&] {
-        bn_forward_mlp_sram_kernel<scalar_t><<<blocks_batch_norm, threads_batch_norm>>>(
-            X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-            sum.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             gamma.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             beta.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
             batch_norm_out.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
         );
     }));
+
+
+    // // batch norm will use a even dispatched block size
+    // const dim3 threads_batch_norm(BLOCK_SIZE_BN_X, BLOCK_SIZE_BN_Y);
+    // const dim3 blocks_batch_norm((N + threads_batch_norm.x - 1) / threads_batch_norm.x, (C + threads_batch_norm.y - 1) / threads_batch_norm.y);
+
+    // // std::cout << "blocks batch norm: " << blocks_batch_norm.x << ", " << blocks_batch_norm.y << std::endl;
+
+    // // launch the kernel
+    // AT_DISPATCH_FLOATING_TYPES(X.type(), "bn_forward_mlp_kernel",
+    // ([&] {
+    //     bn_forward_mlp_sram_kernel<scalar_t><<<blocks_batch_norm, threads_batch_norm>>>(
+    //         X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+    //         sum.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+    //         gamma.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+    //         beta.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+    //         batch_norm_out.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
+    //     );
+    // }));
 
     // batch_norm_out contains all things that we need to save in PyTorch
     // gamma will be saved outside in PyTorch, here only save bn_out and std_eps
